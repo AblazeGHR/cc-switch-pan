@@ -33,7 +33,7 @@ fn execute(mut args: Vec<String>) -> Result<Value, String> {
     let original_args = args.clone();
     let in_gui = GUI_STATE.with(|slot| slot.borrow().is_some());
     if args == ["--version"] {
-        return Ok(json!({"contract": CONTRACT, "backend": "GUI", "guiVersion": "3.20.4", "guiRevision": "93994110505d4d4aae3a7a3582797aae48c2dc74"}));
+        return Ok(json!({"contract": CONTRACT, "backend": "GUI", "guiVersion": "4.0.15", "guiRevision": "79e754ab1b6ed50da57dae1d0faecab4b3b52f1c"}));
     }
     let mut app = AppType::Codex;
     if let Some(index) = args.iter().position(|v| v == "--app") {
@@ -156,7 +156,7 @@ fn read_state() -> Result<AppState, String> {
         .map_err(|_| "Cannot open existing GUI database for reading")?;
     let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| "Cannot read GUI database version")?;
-    if !(18..=19).contains(&version) { return Err("Open the matching GUI to initialize a supported database before listing".into()); }
+    if !(18..=20).contains(&version) { return Err("Open the matching GUI to initialize a supported database before listing".into()); }
     Ok(AppState::new(Arc::new(Database { conn: std::sync::Mutex::new(connection) })))
 }
 
@@ -215,10 +215,10 @@ async fn quota(state: &AppState, app: &AppType, provider: &Provider) -> Result<V
         let id = match provider.meta.as_ref().and_then(|m| m.managed_account_id_for("codex_oauth")) {
             Some(id) => Some(id), None => manager.default_account_id().await,
         }.ok_or("No default managed account")?;
-        let token = manager.get_valid_token_for_account(&id).await.map_err(|_| "GUI token unavailable; use GUI reauthentication, do not retry an old refresh token")?;
-        let workspace = manager.chatgpt_account_id_for_account(&id).await.map_err(|_| "GUI workspace unavailable")?;
-        let value = crate::services::subscription::query_codex_quota(&token, Some(&workspace), "codex_oauth", "Managed credentials require GUI reauthentication")
+        let mut value = crate::commands::codex_oauth::query_codex_oauth_quota_for(manager, &id)
             .await.map_err(|_| "GUI quota query transport failed")?;
+        state.usage_cache.put_codex_oauth(id, value.clone());
+        if value.error.is_some() { value.error = Some("GUI quota unavailable; check account authentication in GUI".into()); }
         json!({"type":"subscription", "quota":value})
     } else if official {
         let current = ProviderService::current(state, app.clone()).map_err(|_| "Current provider unavailable")?;
