@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 import {
   Plus,
   Settings,
@@ -176,6 +177,14 @@ const getInitialView = (): View => {
 function App() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  useEffect(() => {
+    const subscription = listen("cli-state-updated", () => {
+      void queryClient.invalidateQueries({ queryKey: ["providers"] });
+      void queryClient.invalidateQueries({ queryKey: ["managed-auth-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["codex_oauth"] });
+    });
+    return () => { void subscription.then((unlisten) => unlisten()); };
+  }, [queryClient]);
 
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp: AppId =

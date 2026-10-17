@@ -12,17 +12,19 @@ rust-version = "1.85.0"
 
 [lib]
 name = "cc_switch_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 doctest = false
 
 [features]
 default = []
 test-hooks = []
+custom-protocol = ["tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2.4.0", features = [] }
 
 [dependencies]
+fs2 = "0.4"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
@@ -44,7 +46,7 @@ arboard = "3.6"
 flate2 = "1"
 brotli = "7"
 zstd = "0.13"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util"] }
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.5"
@@ -119,3 +121,7 @@ strip = "symbols"
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+
+[[bin]]
+name = "pan-cc-switch"
+path = "src/bin/pan-cc-switch.rs"

@@ -452,6 +452,7 @@ pub fn run() {
 
             // 预先刷新 Store 覆盖配置，确保后续路径读取正确（日志/数据库等）
             app_store::refresh_app_config_dir_override(app.handle());
+            app.manage(pan_cli_ipc::claim_owner().map_err(std::io::Error::other)?);
             panic_hook::init_app_config_dir(crate::config::get_app_config_dir());
 
             // 初始化日志（输出到 <app_config_dir>/logs/cc-switch.log）
@@ -1131,6 +1132,7 @@ pub fn run() {
             );
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
+            pan_cli_ipc::start(app.handle().clone());
 
             // 初始化 SkillService
             let skill_service = SkillService::new();
@@ -2410,3 +2412,7 @@ mod tests {
         assert_eq!(apps, vec!["grokbuild"]);
     }
 }
+
+pub mod pan_minimal_cli;
+
+pub mod pan_cli_ipc;
