@@ -33,7 +33,7 @@ fn execute(mut args: Vec<String>) -> Result<Value, String> {
     let original_args = args.clone();
     let in_gui = GUI_STATE.with(|slot| slot.borrow().is_some());
     if args == ["--version"] {
-        return Ok(json!({"contract": CONTRACT, "backend": "GUI", "guiRevision": "f3b18df12007d0fd79fd8ad8d310880664015197"}));
+        return Ok(json!({"contract": CONTRACT, "backend": "GUI", "guiVersion": "3.20.4", "guiRevision": "93994110505d4d4aae3a7a3582797aae48c2dc74"}));
     }
     let mut app = AppType::Codex;
     if let Some(index) = args.iter().position(|v| v == "--app") {
@@ -100,7 +100,7 @@ fn execute(mut args: Vec<String>) -> Result<Value, String> {
             Ok(json!({"ok": true, "default_account_id": id}))
         }
         ["provider", "list", "--json"] => {
-            let state = state()?;
+            let state = read_state()?;
             let providers = ProviderService::list(&state, app.clone()).map_err(|_| "GUI provider list failed")?;
             let current = ProviderService::current(&state, app.clone()).map_err(|_| "GUI current provider query failed")?;
             let mut rows: Vec<_> = providers.values().collect();
@@ -145,6 +145,19 @@ fn state() -> Result<AppState, String> {
     if !root.join("cc-switch.db").exists() { return Err("GUI database is missing; open GUI to initialize it first".into()); }
     let db = Database::init().map_err(|_| "GUI database initialization failed; no CLI schema fallback is used")?;
     Ok(AppState::new(Arc::new(db)))
+}
+
+fn read_state() -> Result<AppState, String> {
+    if let Some(state) = GUI_STATE.with(|slot| slot.borrow().clone()) { return Ok(state); }
+    // Listing uses the GUI's DAO and provider service, without GUI startup
+    // maintenance (migration, log pruning, pricing seeding or vacuum).
+    let path = crate::config::get_app_config_dir().join("cc-switch.db");
+    let connection = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|_| "Cannot open existing GUI database for reading")?;
+    let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|_| "Cannot read GUI database version")?;
+    if !(18..=19).contains(&version) { return Err("Open the matching GUI to initialize a supported database before listing".into()); }
+    Ok(AppState::new(Arc::new(Database { conn: std::sync::Mutex::new(connection) })))
 }
 
 fn require_v2_store() -> Result<(), String> {
