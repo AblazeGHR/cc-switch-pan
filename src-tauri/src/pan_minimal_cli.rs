@@ -157,7 +157,7 @@ fn read_state() -> Result<AppState, String> {
     let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| "Cannot read GUI database version")?;
     if !(18..=20).contains(&version) { return Err("Open the matching GUI to initialize a supported database before listing".into()); }
-    Ok(AppState::new(Arc::new(Database { conn: std::sync::Mutex::new(connection) })))
+    Ok(AppState::new(Arc::new(Database { conn: std::sync::Mutex::new(connection), log_count_cache: std::sync::Mutex::new(None) })))
 }
 
 fn require_v2_store() -> Result<(), String> {
@@ -215,10 +215,13 @@ async fn quota(state: &AppState, app: &AppType, provider: &Provider) -> Result<V
         let id = match provider.meta.as_ref().and_then(|m| m.managed_account_id_for("codex_oauth")) {
             Some(id) => Some(id), None => manager.default_account_id().await,
         }.ok_or("No default managed account")?;
-        let mut value = crate::commands::codex_oauth::query_codex_oauth_quota_for(manager, &id)
+        let mut value = crate::commands::query_codex_oauth_quota_for(manager, &id)
             .await.map_err(|_| "GUI quota query transport failed")?;
         state.usage_cache.put_codex_oauth(id, value.clone());
-        if value.error.is_some() { value.error = Some("GUI quota unavailable; check account authentication in GUI".into()); }
+        if value.error.is_some() {
+            value.error = Some("GUI quota unavailable; check account authentication in GUI".into());
+            value.credential_message = value.error.clone();
+        }
         json!({"type":"subscription", "quota":value})
     } else if official {
         let current = ProviderService::current(state, app.clone()).map_err(|_| "Current provider unavailable")?;

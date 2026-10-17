@@ -15,8 +15,11 @@ $env:TEMP = $env:TMP = Join-Path $BuildRoot 'tmp'
 $env:PATH = (Join-Path $BuildRoot 'target/debug') + ';D:\software\mingw64\bin;' + $env:PATH
 if ($Test) {
     $artifacts = & $Cargo test --manifest-path (Join-Path $repo 'src-tauri/Cargo.toml') --lib --no-run --message-format=json
-    if ($LASTEXITCODE) { exit $LASTEXITCODE }
-    $binary = $artifacts | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable } | Select-Object -Last 1 -ExpandProperty executable
+    $buildExit = $LASTEXITCODE
+    $messages = $artifacts | ForEach-Object { $_ | ConvertFrom-Json }
+    $messages | Where-Object { $_.reason -eq 'compiler-message' } | ForEach-Object { Write-Host $_.message.rendered }
+    if ($buildExit) { exit $buildExit }
+    $binary = $messages | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable } | Select-Object -Last 1 -ExpandProperty executable
     if (!$binary) { throw 'Test executable not found' }
     python (Join-Path $PSScriptRoot 'embed-test-manifest.py') $binary (Join-Path $repo 'src-tauri/common-controls.manifest')
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
