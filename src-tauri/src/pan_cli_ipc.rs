@@ -5,22 +5,31 @@ use std::time::Duration;
 
 /// Lifetime owner shared by the new GUI and standalone CLI. The original GUI
 /// does not use this lock and must be closed before standalone mutations.
-pub(crate) struct CliOwner { _file: std::fs::File }
+pub(crate) struct CliOwner {
+    _file: std::fs::File,
+}
 
 pub(crate) fn claim_owner() -> Result<CliOwner, String> {
     use fs2::FileExt;
     let root = crate::config::get_app_config_dir();
     std::fs::create_dir_all(&root).map_err(|_| "Cannot open GUI data directory")?;
-    let file = std::fs::OpenOptions::new().create(true).read(true).write(true).open(root.join(".gui-cli-owner.lock"))
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(root.join(".gui-cli-owner.lock"))
         .map_err(|_| "Cannot open GUI/CLI ownership lock")?;
-    file.try_lock_exclusive().map_err(|_| "GUI/CLI is starting or busy; retry a read later, no fallback was executed")?;
+    file.try_lock_exclusive()
+        .map_err(|_| "GUI/CLI is starting or busy; retry a read later, no fallback was executed")?;
     Ok(CliOwner { _file: file })
 }
 
 #[cfg(windows)]
 fn address() -> String {
     use sha2::{Digest, Sha256};
-    let root = crate::config::get_app_config_dir().to_string_lossy().to_lowercase();
+    let root = crate::config::get_app_config_dir()
+        .to_string_lossy()
+        .to_lowercase();
     let hash = format!("{:x}", Sha256::digest(root.as_bytes()));
     format!(r"\\.\pipe\cc-switch-gui-cli-{}", &hash[..24])
 }
@@ -28,7 +37,10 @@ fn address() -> String {
 pub(crate) fn forward(args: &[String]) -> Result<Option<Result<Value, String>>, String> {
     #[cfg(windows)]
     {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|_| "CLI IPC runtime failed")?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "CLI IPC runtime failed")?;
         rt.block_on(async {
             use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
             use tokio::net::windows::named_pipe::ClientOptions;
@@ -38,31 +50,61 @@ pub(crate) fn forward(args: &[String]) -> Result<Option<Result<Value, String>>, 
                 match ClientOptions::new().open(&path) {
                     Ok(pipe) => break pipe,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                    Err(error) if error.raw_os_error() == Some(231) && std::time::Instant::now() < until => {
+                    Err(error)
+                        if error.raw_os_error() == Some(231)
+                            && std::time::Instant::now() < until =>
+                    {
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
-                    Err(_) => return Err("GUI pipe unavailable; no standalone fallback was attempted".into()),
+                    Err(_) => {
+                        return Err(
+                            "GUI pipe unavailable; no standalone fallback was attempted".into()
+                        )
+                    }
                 }
             };
             let exchange = async {
                 let (reader, mut writer) = tokio::io::split(pipe);
-                let payload = serde_json::to_vec(&json!({"protocol":"cc-switch-cli/v1", "arguments":args})).map_err(|_| "Invalid CLI request")?;
-                if payload.len() > 32768 { return Err("CLI request is too large".into()); }
-                writer.write_all(&payload).await.map_err(|_| "GUI receipt unknown; do not retry a switch")?;
-                writer.write_all(b"\n").await.map_err(|_| "GUI receipt unknown; do not retry a switch")?;
+                let payload =
+                    serde_json::to_vec(&json!({"protocol":"cc-switch-cli/v1", "arguments":args}))
+                        .map_err(|_| "Invalid CLI request")?;
+                if payload.len() > 32768 {
+                    return Err("CLI request is too large".into());
+                }
+                writer
+                    .write_all(&payload)
+                    .await
+                    .map_err(|_| "GUI receipt unknown; do not retry a switch")?;
+                writer
+                    .write_all(b"\n")
+                    .await
+                    .map_err(|_| "GUI receipt unknown; do not retry a switch")?;
                 let mut line = String::new();
-                BufReader::new(reader.take(2 * 1024 * 1024)).read_line(&mut line).await.map_err(|_| "GUI outcome unknown; do not replay")?;
-                let response: Value = serde_json::from_str(&line).map_err(|_| "Invalid GUI response; outcome unknown")?;
-                if let Some(error) = response.get("error").and_then(Value::as_str) { return Err(error.to_owned()); }
-                response.get("result").cloned().ok_or_else(|| "Missing GUI result; outcome unknown".into())
+                BufReader::new(reader.take(2 * 1024 * 1024))
+                    .read_line(&mut line)
+                    .await
+                    .map_err(|_| "GUI outcome unknown; do not replay")?;
+                let response: Value = serde_json::from_str(&line)
+                    .map_err(|_| "Invalid GUI response; outcome unknown")?;
+                if let Some(error) = response.get("error").and_then(Value::as_str) {
+                    return Err(error.to_owned());
+                }
+                response
+                    .get("result")
+                    .cloned()
+                    .ok_or_else(|| "Missing GUI result; outcome unknown".into())
             };
-            let result = tokio::time::timeout(Duration::from_secs(28), exchange).await
+            let result = tokio::time::timeout(Duration::from_secs(28), exchange)
+                .await
                 .map_err(|_| "GUI request timed out; outcome unknown, do not replay")?;
             Ok(Some(result))
         })
     }
     #[cfg(not(windows))]
-    { let _ = args; Ok(None) }
+    {
+        let _ = args;
+        Ok(None)
+    }
 }
 
 pub(crate) fn start(app: tauri::AppHandle) {
@@ -74,45 +116,79 @@ pub(crate) fn start(app: tauri::AppHandle) {
         // Reserve before spawning. No TCP/HTTP listener and no second credential manager.
         let path = address();
         tauri::async_runtime::spawn(async move {
-            let mut pipe = match ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&path) {
+            let mut pipe = match ServerOptions::new()
+                .first_pipe_instance(true)
+                .reject_remote_clients(true)
+                .create(&path)
+            {
                 Ok(pipe) => pipe,
-                Err(error) => { log::error!("CLI pipe could not start: {error}"); return; }
+                Err(error) => {
+                    log::error!("CLI pipe could not start: {error}");
+                    return;
+                }
             };
             loop {
-                if pipe.connect().await.is_err() { break; }
+                if pipe.connect().await.is_err() {
+                    break;
+                }
                 // Sequential admission: one in-flight CLI request in this GUI process.
                 let (reader, mut writer) = tokio::io::split(pipe);
                 let mut line = String::new();
-                let read = tokio::time::timeout(Duration::from_secs(3),
-                    BufReader::new(reader.take(32769)).read_line(&mut line)).await;
+                let read = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    BufReader::new(reader.take(32769)).read_line(&mut line),
+                )
+                .await;
                 let args = if matches!(read, Ok(Ok(_))) && line.len() <= 32768 {
-                    serde_json::from_str::<Value>(&line).ok().filter(|v| v["protocol"] == "cc-switch-cli/v1")
-                        .and_then(|v| serde_json::from_value::<Vec<String>>(v["arguments"].clone()).ok())
-                } else { None };
+                    serde_json::from_str::<Value>(&line)
+                        .ok()
+                        .filter(|v| v["protocol"] == "cc-switch-cli/v1")
+                        .and_then(|v| {
+                            serde_json::from_value::<Vec<String>>(v["arguments"].clone()).ok()
+                        })
+                } else {
+                    None
+                };
                 let response = if let Some(args) = args {
                     let state = app.state::<crate::AppState>().inner().clone();
-                    let result = tauri::async_runtime::spawn_blocking(move || crate::pan_minimal_cli::execute_in_gui(args, state)).await;
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        crate::pan_minimal_cli::execute_in_gui(args, state)
+                    })
+                    .await;
                     match result {
-                        Ok(Ok(value)) => { crate::tray::schedule_tray_refresh(&app);
+                        Ok(Ok(value)) => {
+                            crate::tray::schedule_tray_refresh(&app);
                             let _ = app.emit("cli-state-updated", json!({"source":"cli"}));
-                            json!({"result":value}) },
+                            json!({"result":value})
+                        }
                         Ok(Err(error)) => json!({"error":error}),
-                        Err(_) => json!({"error":"GUI command ended unexpectedly; outcome unknown"}),
+                        Err(_) => {
+                            json!({"error":"GUI command ended unexpectedly; outcome unknown"})
+                        }
                     }
-                } else { json!({"error":"Invalid CLI IPC request"}) };
+                } else {
+                    json!({"error":"Invalid CLI IPC request"})
+                };
                 let mut output = serde_json::to_vec(&response).unwrap_or_default();
                 output.push(b'\n');
-                let _ = tokio::time::timeout(Duration::from_secs(2), writer.write_all(&output)).await;
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(2), writer.write_all(&output)).await;
                 // Dropping the connected pipe also closes clients with uncertain results.
                 drop(writer);
-                pipe = match ServerOptions::new().reject_remote_clients(true).create(&path) {
-                    Ok(next) => next, Err(_) => break,
+                pipe = match ServerOptions::new()
+                    .reject_remote_clients(true)
+                    .create(&path)
+                {
+                    Ok(next) => next,
+                    Err(_) => break,
                 };
             }
         });
     }
     #[cfg(not(windows))]
-    { let _ = app; }
+    {
+        let _ = app;
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -132,7 +208,11 @@ mod tests {
         let state = crate::AppState::new(Arc::new(crate::Database::memory().unwrap()));
         runtime.block_on(async {
             for id in ["fixture-a", "fixture-b"] {
-                state.codex_oauth_manager.add_test_account_with_user_identity(id, "fake-access", id).await.unwrap();
+                state
+                    .codex_oauth_manager
+                    .add_test_account_with_user_identity(id, "fake-access", id)
+                    .await
+                    .unwrap();
             }
         });
         let path = crate::config::get_app_config_dir().join("codex_oauth_auth.json");
@@ -143,24 +223,42 @@ mod tests {
         let server = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let pipe = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&name).unwrap();
+                let pipe = ServerOptions::new()
+                    .first_pipe_instance(true)
+                    .reject_remote_clients(true)
+                    .create(&name)
+                    .unwrap();
                 ready_tx.send(()).unwrap();
                 pipe.connect().await.unwrap();
                 let (reader, mut writer) = tokio::io::split(pipe);
                 let mut line = String::new();
                 BufReader::new(reader).read_line(&mut line).await.unwrap();
                 let message: Value = serde_json::from_str(&line).unwrap();
-                let args: Vec<String> = serde_json::from_value(message["arguments"].clone()).unwrap();
-                let result = tokio::task::spawn_blocking(move || crate::pan_minimal_cli::execute_in_gui(args, shared)).await.unwrap().unwrap();
+                let args: Vec<String> =
+                    serde_json::from_value(message["arguments"].clone()).unwrap();
+                let result = tokio::task::spawn_blocking(move || {
+                    crate::pan_minimal_cli::execute_in_gui(args, shared)
+                })
+                .await
+                .unwrap()
+                .unwrap();
                 let payload = json!({"result":result}).to_string() + "\n";
                 writer.write_all(payload.as_bytes()).await.unwrap();
             });
         });
         ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        let result = forward(&["auth".into(), "default".into(), "fixture-b".into()]).unwrap().unwrap().unwrap();
+        let result = forward(&["auth".into(), "default".into(), "fixture-b".into()])
+            .unwrap()
+            .unwrap()
+            .unwrap();
         assert_eq!(result["default_account_id"], "fixture-b");
         server.join().unwrap();
-        assert_eq!(runtime.block_on(state.codex_oauth_manager.default_account_id()).as_deref(), Some("fixture-b"));
+        assert_eq!(
+            runtime
+                .block_on(state.codex_oauth_manager.default_account_id())
+                .as_deref(),
+            Some("fixture-b")
+        );
         let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(before["accounts"], after["accounts"]);
         assert_eq!(after["version"], 2);

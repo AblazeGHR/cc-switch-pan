@@ -160,7 +160,9 @@ function App() {
       void queryClient.invalidateQueries({ queryKey: ["managed-auth-status"] });
       void queryClient.invalidateQueries({ queryKey: ["codex_oauth"] });
     });
-    return () => { void subscription.then((unlisten) => unlisten()).catch(() => {}); };
+    return () => {
+      void subscription.then((unlisten) => unlisten()).catch(() => {});
+    };
   }, [queryClient]);
   const { hasUpdate } = useUpdate();
 
