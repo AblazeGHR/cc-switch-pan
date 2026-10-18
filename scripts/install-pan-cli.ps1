@@ -13,13 +13,15 @@ New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 Copy-Item -LiteralPath $console -Destination (Join-Path $InstallRoot 'cc-switch.exe')
 Copy-Item -LiteralPath $gui -Destination (Join-Path $InstallRoot 'cc-switch-gui.exe')
 Copy-Item -LiteralPath (Join-Path $BuildRoot 'target/debug/WebView2Loader.dll') -Destination $InstallRoot
+Copy-Item -LiteralPath (Join-Path $repo 'scripts/cc-switch-launcher.vbs') -Destination $InstallRoot
+Copy-Item -LiteralPath (Join-Path $repo 'cc-switch-launcher.ini') -Destination $InstallRoot
 # Strip only debug symbols from the install copies; preserve source build artifacts.
 $strip = 'D:\software\mingw64\bin\strip.exe'
 if (Test-Path -LiteralPath $strip) {
     & $strip --strip-debug (Join-Path $InstallRoot 'cc-switch.exe') (Join-Path $InstallRoot 'cc-switch-gui.exe')
     if ($LASTEXITCODE) { throw 'Could not strip install copies' }
 }
-'@echo off', 'start "" "%~dp0cc-switch-gui.exe" %*' | Set-Content -LiteralPath (Join-Path $InstallRoot 'cc-switch-app.cmd') -Encoding ascii
+'@echo off', 'wscript.exe "%~dp0cc-switch-launcher.vbs" %*' | Set-Content -LiteralPath (Join-Path $InstallRoot 'cc-switch-app.cmd') -Encoding ascii
 $installed = & (Join-Path $InstallRoot 'cc-switch.exe') --version | ConvertFrom-Json
 if ($LASTEXITCODE -or $installed.contract -ne 'pan-cc-switch-gui/v1') { throw 'Installed console smoke test failed; PATH untouched' }
 if ($RetireLegacy) {
