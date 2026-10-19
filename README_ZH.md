@@ -1,3 +1,11 @@
+## Pan 专用版本
+
+本仓库是专门为 **Pan** 改造的 CC Switch Fork，提供 Pan 所需的 CLI 入口与集成协议。我们会持续合并 [官方上游](https://github.com/farion1231/cc-switch) 的版本更新，并维护与 Pan 的兼容性。
+
+**Pan 的 `cc-switch-bridge` 插件仅支持配套使用本仓库的版本。官方原版 GUI 和其他 CC Switch CLI/Fork 不能直接替代此版本接入 Pan 插件。**
+
+---
+
 <div align="center">
 
 # CC Switch
